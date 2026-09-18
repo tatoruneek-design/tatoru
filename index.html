@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Fluffy Diary - 心のきもちを空へ飛ばす場所</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js & OrbitControls -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'M PLUS Rounded 1c', sans-serif;
+            background: linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 100%);
+            overflow: hidden;
+            touch-action: none;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.75);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 2px solid rgba(255, 255, 255, 0.9);
+            box-shadow: 0 15px 35px rgba(142, 197, 252, 0.3);
+        }
+        .float-anim {
+            animation: floating 4s ease-in-out infinite;
+        }
+        @keyframes floating {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-8px); }
+        }
+    </style>
+</head>
+<body class="w-screen h-screen relative select-none">
+
+    <!-- 3Dキャンバス描画エリア -->
+    <div id="canvas-container" class="absolute inset-0 z-0"></div>
+
+    <!-- UIオーバーレイ -->
+    <div class="absolute inset-0 z-10 pointer-events-none flex flex-col justify-between p-6">
+        
+        <!-- ヘッダー -->
+        <header class="flex justify-between items-center pointer-events-auto">
+            <div class="glass-panel px-5 py-2.5 rounded-full flex items-center space-x-3 float-anim">
+                <span class="text-2xl">✨</span>
+                <div>
+                    <h1 class="text-base font-bold text-indigo-900 tracking-wide">そらのおとダイアリー</h1>
+                    <p class="text-xs text-indigo-700/80">今の気持ちを絵文字の風船にして空へ放とう</p>
+                </div>
+            </div>
+
+            <!-- カメラ視点切替ボタン -->
+            <button id="view-toggle-btn" class="glass-panel px-5 py-3 rounded-full text-indigo-900 font-bold text-sm hover:bg-white/90 transition shadow-lg active:scale-95 flex items-center space-x-2">
+                <span>🔄</span> <span id="view-mode-text">視点モード: ドラッグで押す</span>
+            </button>
+        </header>
+
+        <!-- 中央：ヒント表示 -->
+        <div class="self-center pointer-events-none text-center bg-white/40 backdrop-blur-md px-6 py-2 rounded-full border border-white/60 shadow-sm transition-opacity duration-1000" id="hint-banner">
+            <p class="text-xs font-medium text-indigo-900">💡 絵文字を選んで気持ちを送信すると、立体的なバルーンになって空へ浮かびます</p>
+        </div>
+
+        <!-- フッター / 入力パネル -->
+        <footer class="self-center w-full max-w-xl pointer-events-auto pb-4">
+            <div class="glass-panel p-5 rounded-3xl shadow-2xl flex flex-col space-y-3">
+                
+                <!-- 絵文字選択パレット -->
+                <div class="flex items-center justify-between bg-white/50 p-2 rounded-2xl border border-white">
+                    <span class="text-xs font-bold text-indigo-900 px-2">きょうの絵文字:</span>
+                    <div id="emoji-palette" class="flex space-x-1.5 overflow-x-auto py-1 px-1">
+                        <!-- JSで動的生成 -->
+                    </div>
+                </div>
+
+                <!-- テキストエリアと送信ボタン -->
+                <div class="flex items-center space-x-2">
+                    <input type="text" id="diary-input" placeholder="いまどんな気持ち？ (例: うれしい、モヤモヤ...)" 
+                           class="flex-1 bg-white/80 border border-indigo-100 rounded-2xl px-4 py-3 text-sm text-indigo-900 placeholder-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-400 transition shadow-inner">
+                    
+                    <button id="send-btn" class="bg-gradient-to-r from-pink-400 to-indigo-500 text-white font-bold px-6 py-3 rounded-2xl shadow-lg hover:opacity-95 active:scale-95 transition flex items-center space-x-1 text-sm shrink-0">
+                        <span>🚀</span>
+                        <span>とばす</span>
+                    </button>
+                </div>
+
+            </div>
+        </footer>
+    </div>
+
+    <!-- メインの3Dロジック -->
+    <script>
+        const emojis = ['❤️', '⭐', '🌸', '🧸', '🍀', '💧', '☁️', '🔥', '💎', '🌙', '🦋', '🍎'];
+        let selectedEmoji = '❤️';
+
+        // 絵文字パレットの構築
+        const paletteContainer = document.getElementById('emoji-palette');
+        emojis.forEach((emo, idx) => {
+            const btn = document.createElement('button');
+            btn.className = `w-10 h-10 rounded-xl text-lg flex items-center justify-center transition transform hover:scale-110 ${idx === 0 ? 'bg-white shadow-md scale-105 border-2 border-indigo-400' : 'hover:bg-white/60'}`;
+            btn.innerText = emo;
+            btn.onclick = () => {
+                document.querySelectorAll('#emoji-palette button').forEach(b => {
+                    b.className = 'w-10 h-10 rounded-xl text-lg flex items-center justify-center transition transform hover:scale-110 hover:bg-white/60';
+                });
+                btn.className = 'w-10 h-10 rounded-xl text-lg flex items-center justify-center transition transform scale-105 bg-white shadow-md border-2 border-indigo-400';
+                selectedEmoji = emo;
+            };
+            paletteContainer.appendChild(btn);
+        });
+
+        // --- Three.js セットアップ ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0xe0c3fc, 0.015);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 2, 28);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.enableRotate = false; // デフォルトはオブジェクト操作モード
+        controls.enableZoom = true;
+        controls.maxDistance = 50;
+        controls.minDistance = 10;
+
+        // ライティング（癒やしの柔らかい光）
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xfff0f5, 1.2);
+        dirLight.position.set(15, 25, 15);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 1024;
+        dirLight.shadow.mapSize.height = 1024;
+        scene.add(dirLight);
+
+        const pinkLight = new THREE.PointLight(0xffb6c1, 1.5, 50);
+        pinkLight.position.set(-15, -10, 10);
+        scene.add(pinkLight);
+
+        const blueLight = new THREE.PointLight(0x87ceeb, 1.5, 50);
+        blueLight.position.set(15, -10, -10);
+        scene.add(blueLight);
+
+        // 星屑パーティクル
+        const particleCount = 120;
+        const particleGeo = new THREE.BufferGeometry();
+        const particlePos = new Float32Array(particleCount * 3);
+        for(let i=0; i<particleCount*3; i+=3) {
+            particlePos[i] = (Math.random() - 0.5) * 60;
+            particlePos[i+1] = (Math.random() - 0.5) * 40;
+            particlePos[i+2] = (Math.random() - 0.5) * 40;
+        }
+        particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePos, 3));
+        const particleMat = new THREE.PointsMaterial({
+            color: 0xffffff,
+            size: 0.3,
+            transparent: true,
+            opacity: 0.7
+        });
+        const starField = new THREE.Points(particleGeo, particleMat);
+        scene.add(starField);
+
+        // 管理オブジェクト配列
+        let balloons = [];
+
+        // 共通のマテリアル（ぷるんとしたツヤのある質感）
+        function createBalloonMaterial(colorHex) {
+            return new THREE.MeshPhysicalMaterial({
+                color: colorHex,
+                roughness: 0.15,
+                metalness: 0.1,
+                transmission: 0.2, // わずかな透明感
+                ior: 1.5,
+                clearcoat: 1.0,
+                clearcoatRoughness: 0.1,
+                reflectivity: 0.9
+            });
+        }
+
+        // 絵文字に応じた正確な3D形状を生成する関数
+        function createEmojiShapeGeometry(emoji) {
+            const x = 0, y = 0;
+            const shape = new THREE.Shape();
+
+            if (emoji === '❤️') {
+                shape.moveTo(x, y + 0.6);
+                shape.bezierCurveTo(x, y + 1.2, x - 1.5, y + 1.2, x - 1.5, y + 0.3);
+                shape.bezierCurveTo(x - 1.5, y - 0.6, x, y - 1.4, x, y - 2.0);
+                shape.bezierCurveTo(x, y - 1.4, x + 1.5, y - 0.6, x + 1.5, y + 0.3);
+                shape.bezierCurveTo(x + 1.5, y + 1.2, x, y + 1.2, x, y + 0.6);
+            } else if (emoji === '⭐') {
+                const points = 5;
+                const outerRadius = 1.4;
+                const innerRadius = 0.6;
+                for (let i = 0; i < points * 2; i++) {
+                    const r = (i % 2 === 0) ? outerRadius : innerRadius;
+                    const a = (i / (points * 2)) * Math.PI * 2 - Math.PI / 2;
+                    const nx = x + Math.cos(a) * r;
+                    const ny = y + Math.sin(a) * r;
+                    if (i === 0) shape.moveTo(nx, ny);
+                    else shape.lineTo(nx, ny);
+                }
+                shape.closePath();
+            } else if (emoji === '🌸') {
+                for (let i = 0; i < 5; i++) {
+                    const angle = (i / 5) * Math.PI * 2;
+                    const cx = x + Math.cos(angle) * 0.8;
+                    const cy = y + Math.sin(angle) * 0.8;
+                    const petalGeo = new THREE.Path();
+                    // 簡易的に円形状のパスを合成
+                    shape.absarc(cx, cy, 0.7, 0, Math.PI * 2, false);
+                }
+            } else if (emoji === '🧸') {
+                // クマの頭と耳
+                shape.absarc(x, y - 0.2, 1.1, 0, Math.PI * 2, false);
+                const ear1 = new THREE.Path();
+                ear1.absarc(x - 0.9, y + 0.9, 0.5, 0, Math.PI * 2, false);
+                const ear2 = new THREE.Path();
+                ear2.absarc(x + 0.9, y + 0.9, 0.5, 0, Math.PI * 2, false);
+                shape.holes.push(ear1, ear2); // 実際には結合形状として扱うためパス追加
+            } else if (emoji === '💧') {
+                shape.moveTo(x, y + 1.5);
+                shape.bezierCurveTo(x - 1.2, y - 0.2, x - 1.2, y - 1.2, x, y - 1.5);
+                shape.bezierCurveTo(x + 1.2, y - 1.2, x + 1.2, y - 0.2, x, y + 1.5);
+            } else if (emoji === '☁️') {
+                shape.absarc(x - 0.6, y, 0.8, 0, Math.PI * 2, false);
+                shape.absarc(x + 0.6, y + 0.2, 0.9, 0, Math.PI * 2, false);
+                shape.absarc(x, y + 0.6, 0.8, 0, Math.PI * 2, false);
+            } else if (emoji === '🔥') {
+                shape.moveTo(x, y - 1.5);
+                shape.bezierCurveTo(x - 1.5, y, x - 0.5, y + 1.0, x, y + 1.8);
+                shape.bezierCurveTo(x + 0.5, y + 1.0, x + 1.5, y, x, y - 1.5);
+            } else if (emoji === '💎') {
+                shape.moveTo(x, y + 1.2);
+                shape.lineTo(x + 1.3, y + 0.2);
+                shape.lineTo(x + 0.7, y - 1.3);
+                shape.lineTo(x - 0.7, y - 1.3);
+                shape.lineTo(x - 1.3, y + 0.2);
+                shape.closePath();
+            } else if (emoji === '🌙') {
+                shape.absarc(x, y, 1.3, -Math.PI/1.5, Math.PI/1.5, false);
+                shape.absarc(x + 0.5, y, 1.1, Math.PI/1.3, -Math.PI/1.3, true);
+            } else {
+                // デフォルト：お花・星のような多角形やハートベース
+                shape.absarc(x, y, 1.2, 0, Math.PI * 2, false);
+            }
+
+            const extrudeSettings = {
+                depth: 0.6,
+                bevelEnabled: true,
+                bevelSegments: 5,
+                steps: 2,
+                bevelSize: 0.3,
+                bevelThickness: 0.3
+            };
+
+            const geom = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+            geom.center();
+            return geom;
+        }
+
+        // 背景用の濃いめでふわふわした丸い風船をあらかじめ複数生成
+        const bgColors = [0xff477e, 0x7b2cbf, 0x3a0ca3, 0x4361ee, 0xf72585, 0xb5179e, 0x4895ef];
+        for (let i = 0; i < 18; i++) {
+            const radius = 0.8 + Math.random() * 1.2;
+            const geom = new THREE.SphereGeometry(radius, 32, 32);
+            // 縦長に少し変形させてより風船らしく
+            geom.scale(1, 1.2, 1);
+            const color = bgColors[Math.floor(Math.random() * bgColors.length)];
+            const mat = createBalloonMaterial(color);
+            const mesh = new THREE.Mesh(geom, mat);
+
+            mesh.position.set(
+                (Math.random() - 0.5) * 35,
+                (Math.random() - 0.5) * 20 - 2,
+                (Math.random() - 0.5) * 20 - 5
+            );
+
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+
+            scene.add(mesh);
+            balloons.push({
+                mesh: mesh,
+                isText: false,
+                floatSpeed: 0.4 + Math.random() * 0.6,
+                floatOffset: Math.random() * Math.PI * 2,
+                wobbleSpeed: 1.5 + Math.random() * 2.0,
+                basePos: mesh.position.clone()
+            });
+        }
+
+        // ユーザーが日記（絵文字）を送信したときに追加されるバルーン
+        function spawnDiaryBalloon(emoji, text) {
+            const geom = createEmojiShapeGeometry(emoji);
+            
+            // 少し濃いめで鮮やかな癒やしカラーパレット
+            const vibrantColors = [0xff3366, 0xff5c8a, 0x7209b7, 0x3f37c9, 0x4cc9f0, 0xf72585, 0xfa003f];
+            const color = vibrantColors[Math.floor(Math.random() * vibrantColors.length)];
+            const mat = createBalloonMaterial(color);
+
+            const mesh = new THREE.Mesh(geom, mat);
+
+            // 画面手前の見えやすい位置からすぐ登場
+            mesh.position.set(
+                (Math.random() - 0.5) * 6,
+                -6,
+                4 + Math.random() * 3
+            );
+            mesh.scale.set(0.8, 0.8, 0.8);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+
+            scene.add(mesh);
+
+            balloons.push({
+                mesh: mesh,
+                isText: true,
+                floatSpeed: 0.8 + Math.random() * 0.5,
+                floatOffset: Math.random() * Math.PI * 2,
+                wobbleSpeed: 2.0 + Math.random() * 1.5,
+                basePos: mesh.position.clone(),
+                velocity: new THREE.Vector3((Math.random() - 0.5) * 0.05, 0.08 + Math.random() * 0.04, (Math.random() - 0.5) * 0.05)
+            });
+
+            // ヒントバナーを一時的に演出
+            const banner = document.getElementById('hint-banner');
+            banner.style.opacity = '1';
+            banner.innerHTML = `<p class="text-xs font-bold text-pink-600">✨ 気持ちがふんわり空へ昇華されました (${emoji} ${text || 'きもち'})</p>`;
+            setTimeout(() => {
+                banner.style.opacity = '0.7';
+                banner.innerHTML = `<p class="text-xs font-medium text-indigo-900">💡 カーソルで風船を押したり、視点切替で角度を変えて楽しめます</p>`;
+            }, 4000);
+        }
+
+        // --- インタラクション・マウス / タッチ操作 ---
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let draggedObject = null;
+        let plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+        let intersection = new THREE.Vector3();
+
+        let isOrbitMode = false;
+        const viewToggleBtn = document.getElementById('view-toggle-btn');
+        const viewModeText = document.getElementById('view-mode-text');
+
+        viewToggleBtn.onclick = () => {
+            isOrbitMode = !isOrbitMode;
+            controls.enableRotate = isOrbitMode;
+            if (isOrbitMode) {
+                viewToggleBtn.className = "glass-panel px-5 py-3 rounded-full text-white font-bold text-sm bg-indigo-600/90 transition shadow-lg active:scale-95 flex items-center space-x-2";
+                viewModeText.innerText = "視点モード: 3D回転中 (ON)";
+            } else {
+                viewToggleBtn.className = "glass-panel px-5 py-3 rounded-full text-indigo-900 font-bold text-sm hover:bg-white/90 transition shadow-lg active:scale-95 flex items-center space-x-2";
+                viewModeText.innerText = "視点モード: ドラッグで押す";
+            }
+        };
+
+        window.addEventListener('pointerdown', (e) => {
+            if (isOrbitMode) return; // 視点モードのときはドラッグ無効
+            if (e.target.closest('footer') || e.target.closest('header')) return;
+
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const meshes = balloons.map(b => b.mesh);
+            const intersects = raycaster.intersectObjects(meshes);
+
+            if (intersects.length > 0) {
+                draggedObject = intersects[0].object;
+                controls.enabled = false;
+                plane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(plane.normal).negate(), draggedObject.position);
+            }
+        });
+
+        window.addEventListener('pointermove', (e) => {
+            if (isOrbitMode || !draggedObject) return;
+
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            if (raycaster.ray.intersectPlane(plane, intersection)) {
+                draggedObject.position.copy(intersection);
+                // 追従元の位置も更新
+                const found = balloons.find(b => b.mesh === draggedObject);
+                if (found) found.basePos.copy(intersection);
+            }
+        });
+
+        window.addEventListener('pointerup', () => {
+            if (!isOrbitMode) {
+                draggedObject = null;
+                controls.enabled = true;
+            }
+        });
+
+        // 送信ボタンのイベント
+        const sendBtn = document.getElementById('send-btn');
+        const diaryInput = document.getElementById('diary-input');
+
+        function handleSend() {
+            const text = diaryInput.value.trim();
+            spawnDiaryBalloon(selectedEmoji, text);
+            diaryInput.value = '';
+        }
+
+        sendBtn.onclick = handleSend;
+        diaryInput.onkeydown = (e) => {
+            if (e.key === 'Enter') handleSend();
+        };
+
+        // --- アニメーションループ ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+            const time = clock.getElapsedTime();
+
+            // 星屑のゆっくりとした回転
+            starField.rotation.y = time * 0.02;
+
+            // すべての風船・絵文字バルーンにふわふわした有機的な動きを与える
+            balloons.forEach((b, index) => {
+                if (b.mesh === draggedObject) return; // ドラッグ中は物理・浮遊を一時停止
+
+                if (b.isText) {
+                    // 送信された絵文字バルーンは上へふんわり浮いていき、画面上部でゆらゆら漂う
+                    b.basePos.y += b.velocity.y * delta * 15;
+                    b.basePos.x += Math.sin(time * b.wobbleSpeed + b.floatOffset) * 0.008;
+                    
+                    // 上に行き過ぎたら下に戻して無限ループ
+                    if (b.basePos.y > 15) {
+                        b.basePos.y = -12;
+                        b.basePos.x = (Math.random() - 0.5) * 12;
+                    }
+
+                    b.mesh.position.copy(b.basePos);
+                    b.mesh.rotation.y = Math.sin(time * 0.8 + b.floatOffset) * 0.3;
+                    b.mesh.rotation.x = Math.cos(time * 0.6 + b.floatOffset) * 0.2;
+                } else {
+                    // 背景の丸い風船たちのリッチなゆらぎ・揺れ動き
+                    b.mesh.position.x = b.basePos.x + Math.sin(time * b.wobbleSpeed * 0.5 + b.floatOffset) * 0.6;
+                    b.mesh.position.y = b.basePos.y + Math.cos(time * b.wobbleSpeed * 0.4 + b.floatOffset) * 0.6;
+                    b.mesh.position.z = b.basePos.z + Math.sin(time * b.wobbleSpeed * 0.3 + b.floatOffset) * 0.4;
+
+                    b.mesh.rotation.z = Math.sin(time * 0.5 + b.floatOffset) * 0.15;
+                    b.mesh.rotation.x = Math.cos(time * 0.4 + b.floatOffset) * 0.15;
+                }
+            });
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // ウィンドウリサイズ対応
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
